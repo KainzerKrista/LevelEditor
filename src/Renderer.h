@@ -1,5 +1,5 @@
 #pragma once
-
+#include "Mesh.h"
 #include <Windows.h>
 
 // Direct3D 11
@@ -10,6 +10,10 @@
 
 // Microsoft's ComPtr to handle D3D objects
 #include <wrl/client.h>
+
+#include <glm/glm.hpp>
+#include<cstdint>
+#include<span>
 
 class Renderer
 {
@@ -22,14 +26,20 @@ public:
 	void BeginFrame(float red, float green, float blue, float alpha);
 	void EndFrame();
 
-	void DrawTriangle();
+	bool CreateMesh(Mesh& mesh, std::span<const Vertex> vertices, std::span<const std::uint16_t> indices);
+	void DrawMesh(const Mesh& mesh, const glm::mat4& model);
 
 
 private:
 	bool CreateRenderTarget();
 	void DestroyRenderTarget();
 
-	bool CreateTrianglePipeline();
+
+	bool CreateDepthBuffer(int width, int height);
+	void DestroyDepthBuffer();
+
+	bool CreateMeshPipeline();
+
 
 	void UpdateViewport(int width, int height);
 
@@ -39,10 +49,14 @@ private:
 	Microsoft::WRL::ComPtr<IDXGISwapChain> m_swapChain;
 	Microsoft::WRL::ComPtr<ID3D11RenderTargetView> m_renderTargetView;
 
+	Microsoft::WRL::ComPtr<ID3D11Texture2D> m_depthStencilBuffer;
+	Microsoft::WRL::ComPtr<ID3D11DepthStencilView> m_depthStencilView;
+
 	Microsoft::WRL::ComPtr<ID3D11VertexShader> m_vertexShader;
 	Microsoft::WRL::ComPtr<ID3D11PixelShader> m_pixelShader;
 	Microsoft::WRL::ComPtr<ID3D11InputLayout> m_inputLayout;
-	Microsoft::WRL::ComPtr<ID3D11Buffer> m_vertexBuffer;
+
+	Microsoft::WRL::ComPtr<ID3D11Buffer> m_transformBuffer;
 
 	Microsoft::WRL::ComPtr<ID3D11RasterizerState> m_rasterizerState;
 

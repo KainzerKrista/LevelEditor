@@ -1,6 +1,12 @@
 #include "Renderer.h"
 
 #include <d3dcompiler.h>
+
+#include <glm/glm.hpp>
+#include <glm/ext/matrix_transform.hpp>
+#include <glm/ext/matrix_clip_space.hpp>
+
+#include <cstdint>
 #include<cstddef>
 #include<filesystem>
 #include <iostream>
@@ -8,34 +14,14 @@
 
 namespace 
 { 
-	// match semantics in HLSL
-	struct Vertex
+
+
+	// GLM
+	struct alignas(16) TransformBuffer
 	{
-		// x, y, z
-		float position[3];
-		
-		// red, green blue, alpha
-		float color[4];
-	};
-
-	// Test Triangle
-	constexpr Vertex TriangleVertices[] =
-	{
-		{
-			{0.0f, 0.5f, 0.0f},
-			{1.0f, 0.0f, 0.0f, 1.0f}
-		},
-
-		{
-			{-0.5f, -0.5f, 0.0f},
-			{0.0f, 1.0f, 0.0f, 1.0f}
-		},
-
-		{
-			{0.5f, -0.5f, 0.0f},
-			{0.0f, 0.0f, 1.0f, 1.0f}
-		}
-
+		glm::mat4 model;
+		glm::mat4 view;
+		glm::mat4 projection;
 	};
 
 	std::filesystem::path GetExecutableDirectory()
@@ -146,9 +132,14 @@ bool Renderer::Initialize(HWND windowHandle, int width, int height)
 		return false;
 	}
 
+	if (!CreateDepthBuffer(width, height))
+	{
+		return false;
+	}
+
 	UpdateViewport(width, height);
 
-	if (!CreateTrianglePipeline())
+	if (!CreateMeshPipeline())
 	{
 		return false;
 	}
@@ -180,6 +171,42 @@ bool Renderer::CreateRenderTarget()
 	return true;
 }
 
+bool Renderer::CreateDepthBuffer(int width, int height)
+{
+	D3D11_TEXTURE2D_DESC depthBufferDescription{};
+	
+	depthBufferDescription.Width = width;
+	depthBufferDescription.Height = height;
+	depthBufferDescription.MipLevels = 1;
+	depthBufferDescription.ArraySize = 1;
+	depthBufferDescription.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+	depthBufferDescription.SampleDesc.Count = 1;
+	depthBufferDescription.SampleDesc.Quality = 0;
+	depthBufferDescription.Usage = D3D11_USAGE_DEFAULT;
+	depthBufferDescription.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+	
+	// GPU Texture containing depth values
+	HRESULT result = m_device->CreateTexture2D(&depthBufferDescription, nullptr, &m_depthStencilBuffer);
+
+	if (FAILED(result))
+	{
+		std::cerr << "ERROR: Failed to create depth stencil buffer\n";
+		return false;
+	}
+
+	// Informs D3D this texture is for depth/stencil usage
+	result = m_device->CreateDepthStencilView(m_depthStencilBuffer.Get(), nullptr, &m_depthStencilView);
+
+	if (FAILED(result))
+	{
+		std::cerr << "ERROR: Failed to create depth stencil view\n";
+		return false;
+	}
+
+	return true;
+
+}
+
 void Renderer::DestroyRenderTarget()
 {
 	if (m_deviceContext)
@@ -191,8 +218,14 @@ void Renderer::DestroyRenderTarget()
 	m_renderTargetView.Reset();
 }
 
-// Test Triangle Rendering
-bool Renderer::CreateTrianglePipeline()
+void Renderer::DestroyDepthBuffer()
+{
+	m_depthStencilView.Reset();
+	m_depthStencilBuffer.Reset();
+}
+
+// Test Cube Rendering
+bool Renderer::CreateMeshPipeline()
 {
 	const std::filesystem::path shaderPath = GetExecutableDirectory()
 		/ "assets"
@@ -259,27 +292,22 @@ bool Renderer::CreateTrianglePipeline()
 		return false;
 	}
 
-	std::cout << "Input Laayout created successfully\n";
+	std::cout << "Input Layout created successfully\n";
 
-	D3D11_BUFFER_DESC bufferDescription{};
-
-	bufferDescription.ByteWidth = static_cast<UINT>(sizeof(TriangleVertices));
-	bufferDescription.Usage = D3D11_USAGE_IMMUTABLE;
-	bufferDescription.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+	// Create Constant Buffer
+	D3D11_BUFFER_DESC transformBufferDescription{};
 	
-	D3D11_SUBRESOURCE_DATA initialData{};
+	transformBufferDescription.ByteWidth = static_cast<UINT>(sizeof(TransformBuffer));
+	transformBufferDescription.Usage = D3D11_USAGE_DEFAULT; // These metrix will move constantly
+	transformBufferDescription.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
 
-	initialData.pSysMem = TriangleVertices;
-
-	result = m_device->CreateBuffer(&bufferDescription, &initialData, &m_vertexBuffer);
+	result = m_device->CreateBuffer(&transformBufferDescription, nullptr, &m_transformBuffer);
 
 	if (FAILED(result))
 	{
-		std::cerr << "ERROR: Failed to create vertex buffer\n";
+		std::cerr << "ERROR: Failed to create transform constant buffer\n";
 		return false;
 	}
-
-	std::cout << "Vertex Buffer created successfully\n";
 
 	// Rasterizer Description
 	D3D11_RASTERIZER_DESC rasterizerDescription{};
@@ -300,25 +328,59 @@ bool Renderer::CreateTrianglePipeline()
 	return true;
 }
 
-void Renderer::DrawTriangle()
+bool Renderer::CreateMesh(Mesh& mesh, std::span<const Vertex> vertices, std::span<const std::uint16_t> indices)
 {
-	if (!m_vertexBuffer || !m_vertexShader || !m_pixelShader || !m_inputLayout)
+	if (!m_device)
+	{
+		std::cerr << "ERROR: Mesh cannot be created without renderer initialization\n";
+		return false;
+	}
+
+	return mesh.Initialize(m_device.Get(), vertices, indices);
+}
+
+void Renderer::DrawMesh(const Mesh& mesh, const glm::mat4& model)
+{
+	if (!mesh.GetVertexBuffer() || !mesh.GetIndexBuffer() || !m_vertexShader || !m_pixelShader || !m_inputLayout || !m_transformBuffer)
 	{
 		return;
 	}
+	
+	// Camera Postiion, Target, Up
+	glm::mat4 view = glm::lookAtLH(glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+
+	// Projection Matrix
+	const float aspectRatio = static_cast<float>(m_width) / static_cast<float>(m_height);
+
+	glm::mat4 projection = glm::perspectiveLH_ZO(glm::radians(60.0f), aspectRatio, 0.1f, 100.0f); //FOV, Window wxh, near clipping plane, far clipping plane
+
+	// Fill Constant Buffer structure
+	TransformBuffer transforms{};
+
+	transforms.model = model;
+	transforms.view = view;
+	transforms.projection = projection;
+
+	// Upload transform data to GPU
+	m_deviceContext->UpdateSubresource(m_transformBuffer.Get(), 0, nullptr, &transforms, 0, 0);
 
 	UINT stride = sizeof(Vertex);
 	UINT offset = 0;
 
-	ID3D11Buffer* vertexBuffers[] = { m_vertexBuffer.Get() };
+	ID3D11Buffer* vertexBuffers[] = { mesh.GetVertexBuffer()};
 
 	// Input Assembler
 	m_deviceContext->IASetVertexBuffers(0, 1, vertexBuffers, &stride, &offset);
+	m_deviceContext->IASetIndexBuffer(mesh.GetIndexBuffer(), DXGI_FORMAT_R16_UINT, 0); // Using R16 because std::uint16_t is being used
 	m_deviceContext->IASetInputLayout(m_inputLayout.Get());
 	m_deviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
 	// Vertex Shader
 	m_deviceContext->VSSetShader(m_vertexShader.Get(), nullptr, 0);
+
+	// Bind Constant Buffer to Vertext Shader
+	ID3D11Buffer* constantBuffers[] = { m_transformBuffer.Get() };
+	m_deviceContext->VSSetConstantBuffers(0, 1, constantBuffers); // 0 = register(b0) slot
 
 	// Pixel Shader
 	m_deviceContext->PSSetShader(m_pixelShader.Get(), nullptr, 0);
@@ -326,7 +388,7 @@ void Renderer::DrawTriangle()
 	m_deviceContext->RSSetState(m_rasterizerState.Get());
 
 	// Draw
-	m_deviceContext->Draw(3, 0);
+	m_deviceContext->DrawIndexed(mesh.GetIndexCount(), 0, 0); // number of indicies, start index, base vertex
 }
 
 void Renderer::Resize(int width, int height)
@@ -353,6 +415,7 @@ void Renderer::Resize(int width, int height)
 
 	// Release references to old Back Buffer
 	DestroyRenderTarget();
+	DestroyDepthBuffer();
 
 	// Resize the Swap Chain buffers
 	HRESULT result = m_swapChain->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, 0);
@@ -363,10 +426,15 @@ void Renderer::Resize(int width, int height)
 		return;
 	}
 
-	// Creates a new Render Target View if Back Buffer has been deleted
 	if (!CreateRenderTarget())
 	{
 		std::cerr << "ERROR: Failed to recreate render target after resize\n";
+		return;
+	}
+
+	if (!CreateDepthBuffer(width, height))
+	{
+		std::cerr << "ERROR: Failed to recreate depth buffer after resize\n";
 		return;
 	}
 
@@ -392,18 +460,19 @@ void Renderer::UpdateViewport(int width, int height)
 
 void Renderer::BeginFrame(float red, float green, float blue, float alpha)
 {
-	if (!m_renderTargetView)
+	if (!m_renderTargetView || !m_depthStencilView)
 	{
 		return;
 	}
 
 	ID3D11RenderTargetView* renderTargets[] = { m_renderTargetView.Get() };
 	
-	m_deviceContext->OMSetRenderTargets(1, renderTargets, nullptr);
+	m_deviceContext->OMSetRenderTargets(1, renderTargets, m_depthStencilView.Get());
 	
 	const float clearColor[4] = { red, green, blue, alpha };
 	
 	m_deviceContext->ClearRenderTargetView(m_renderTargetView.Get(), clearColor);
+	m_deviceContext->ClearDepthStencilView(m_depthStencilView.Get(), D3D11_CLEAR_DEPTH, 1.0f, 0);
 }
 
 void Renderer::EndFrame()
@@ -419,12 +488,15 @@ void Renderer::EndFrame()
 void Renderer::Shutdown()
 {
 	DestroyRenderTarget();
+	DestroyDepthBuffer();
 
-	m_vertexBuffer.Reset();
+	m_transformBuffer.Reset();
 	m_inputLayout.Reset();
 
 	m_pixelShader.Reset();
 	m_vertexShader.Reset();
+
+	m_rasterizerState.Reset();
 
 	m_swapChain.Reset();
 	m_deviceContext.Reset();

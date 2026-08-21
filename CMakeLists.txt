@@ -9,12 +9,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_subdirectory(external/SDL EXCLUDE_FROM_ALL)
+add_subdirectory(external/glm EXCLUDE_FROM_ALL)
 
 add_executable(LevelEditor
     src/main.cpp
     src/Renderer.cpp 
+    src/Mesh.cpp
     assets/shaders/Triangle.hlsl
-)
+ "src/Mesh.h" "src/Mesh.cpp")
 
 set_source_files_properties(
     assets/shaders/Triangle.hlsl
@@ -25,6 +27,7 @@ set_source_files_properties(
 target_link_libraries(LevelEditor
     PRIVATE
         SDL3::SDL3
+        glm::glm
 )
 
 if(WIN32)
