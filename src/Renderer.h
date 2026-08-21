@@ -27,7 +27,7 @@ public:
 	void EndFrame();
 
 	bool CreateMesh(Mesh& mesh, std::span<const Vertex> vertices, std::span<const std::uint16_t> indices);
-	void DrawMesh(const Mesh& mesh, const glm::mat4& model);
+	void DrawMesh(const Mesh& mesh, const glm::mat4& model, const glm::mat4& view, const glm::mat4& projection);
 
 
 private:

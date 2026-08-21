@@ -6,10 +6,11 @@
 #include <glm/ext/matrix_transform.hpp>
 
 #include <cstdint>
-
+#include <chrono>
 #include <iostream>
 
 #include "Renderer.h"
+#include "EditorCamera.h"
 
 namespace
 {
@@ -148,6 +149,11 @@ int main(int argc, char* argv[])
         return 1;
     }
 
+    // Create Editor Camera
+    EditorCamera editorCamera;
+
+    editorCamera.SetViewportSize(width, height);
+
     // Create Cube Mesh
     Mesh cubeMesh;
 
@@ -174,11 +180,21 @@ int main(int argc, char* argv[])
     cubeTransform2 = glm::rotate(cubeTransform2, glm::radians(25.0f), glm::vec3(1.0f, 0.0f, 0.0f));
     cubeTransform2 = glm::rotate(cubeTransform2, glm::radians(35.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 
-    // Application loop
+    // Application loop to run per second
+    auto previousTime = std::chrono::steady_clock::now();
     bool running = true;
 
     while (running)
     {
+        auto currentTime = std::chrono::steady_clock::now();
+        float deltaTime = std::chrono::duration<float>(currentTime - previousTime).count();
+        previousTime = currentTime;
+
+        if (deltaTime > 0.1f)
+        {
+            deltaTime = 0.1f;
+        }
+
         SDL_Event event;
 
         while (SDL_PollEvent(&event))
@@ -200,16 +216,126 @@ int main(int argc, char* argv[])
 
                     renderer.Resize(newWidth, newHeight);
 
+                    editorCamera.SetViewportSize(newWidth, newHeight);
+
+                    break;
+                }
+                
+                case SDL_EVENT_MOUSE_BUTTON_DOWN:
+                {
+                    if (event.button.button == SDL_BUTTON_RIGHT)
+                    {
+                        editorCamera.SetLooking(true);
+
+                        if (!SDL_SetWindowRelativeMouseMode(window, true))
+                        {
+                            std::cerr
+                                << "ERROR: Failed to enable relative mouse mode:"
+                                << SDL_GetError()
+                                << '\n';
+                        }
+
+                    }
+
+                    break;
+                }
+
+                case SDL_EVENT_MOUSE_BUTTON_UP:
+                {
+                    if (event.button.button == SDL_BUTTON_RIGHT)
+                    {
+                        editorCamera.SetLooking(false);
+
+                        if (!SDL_SetWindowRelativeMouseMode(window, false))
+                        {
+                            std::cerr
+                                << "ERROR: Failed to disable relative mouse mode:"
+                                << SDL_GetError()
+                                << '\n';
+                        }
+
+                    }
+
+                    break;
+                }
+
+                // Exposes xrel and yrel as relative mouse movements for camera rotation
+                case SDL_EVENT_MOUSE_MOTION:
+                {
+                    if (editorCamera.IsLooking())
+                    {
+                        editorCamera.Rotate(event.motion.xrel, event.motion.yrel);
+                    }
+
                     break;
                 }
             }
         }
+
+        // Keyboard Binding
+        const bool* keyboardState = SDL_GetKeyboardState(nullptr);
+
+        if (editorCamera.IsLooking())
+        {
+            float forwardInput = 0.0f;
+            float rightInput = 0.0f;
+            float upInput = 0.0f;
+
+            // Forward
+            if (keyboardState[SDL_SCANCODE_W])
+            {
+                forwardInput += 1.0f;
+            }
+
+            // Backwards
+            if (keyboardState[SDL_SCANCODE_S])
+            {
+                forwardInput -= 1.0f;
+            }
+
+            // Right
+            if (keyboardState[SDL_SCANCODE_D])
+            {
+                rightInput += 1.0f;
+            }
+
+            // Left
+            if (keyboardState[SDL_SCANCODE_A])
+            {
+                rightInput -= 1.0f;
+            }
+
+            // Up
+            if (keyboardState[SDL_SCANCODE_E])
+            {
+                upInput += 1.0f;
+            }
+
+            // Down
+            if (keyboardState[SDL_SCANCODE_Q])
+            {
+                upInput -= 1.0f;
+            }
+
+            // Boost
+            bool boost = keyboardState[SDL_SCANCODE_LSHIFT] || keyboardState[SDL_SCANCODE_RSHIFT];
+
+            // Move camera
+            editorCamera.Move(forwardInput, rightInput, upInput, deltaTime, boost);
+        }
+
+        // Camera Matrixes
+        const glm::mat4 view = editorCamera.GetViewMatrix();
+        const glm::mat4 projection = editorCamera.GetProjectionMatrix();
+
         // Rendering
         renderer.BeginFrame(0.08f, 0.09f, 0.11f, 1.0f);
 
         // TODO: Draw Scenes functions are added here later
-        renderer.DrawMesh(cubeMesh, cubeTransform);
-        renderer.DrawMesh(cubeMesh, cubeTransform2);
+
+
+        renderer.DrawMesh(cubeMesh, cubeTransform, view, projection);
+        renderer.DrawMesh(cubeMesh, cubeTransform2, view, projection);
         renderer.EndFrame();
     }
     

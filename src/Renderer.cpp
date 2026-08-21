@@ -339,21 +339,13 @@ bool Renderer::CreateMesh(Mesh& mesh, std::span<const Vertex> vertices, std::spa
 	return mesh.Initialize(m_device.Get(), vertices, indices);
 }
 
-void Renderer::DrawMesh(const Mesh& mesh, const glm::mat4& model)
+void Renderer::DrawMesh(const Mesh& mesh, const glm::mat4& model, const glm::mat4& view, const glm::mat4& projection)
 {
 	if (!mesh.GetVertexBuffer() || !mesh.GetIndexBuffer() || !m_vertexShader || !m_pixelShader || !m_inputLayout || !m_transformBuffer)
 	{
 		return;
 	}
 	
-	// Camera Postiion, Target, Up
-	glm::mat4 view = glm::lookAtLH(glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-
-	// Projection Matrix
-	const float aspectRatio = static_cast<float>(m_width) / static_cast<float>(m_height);
-
-	glm::mat4 projection = glm::perspectiveLH_ZO(glm::radians(60.0f), aspectRatio, 0.1f, 100.0f); //FOV, Window wxh, near clipping plane, far clipping plane
-
 	// Fill Constant Buffer structure
 	TransformBuffer transforms{};
 
