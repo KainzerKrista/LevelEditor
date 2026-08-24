@@ -18,17 +18,41 @@ add_executable(LevelEditor
     src/EditorCamera.cpp
     assets/shaders/Triangle.hlsl
  "src/Mesh.h" "src/Mesh.cpp" "src/EditorCamera.h" "src/EditorCamera.cpp")
-
+ 
 set_source_files_properties(
     assets/shaders/Triangle.hlsl
     PROPERTIES
         HEADER_FILE_ONLY TRUE
 )
 
+add_library(imgui STATIC
+    external/imgui/imgui.cpp
+    external/imgui/imgui_demo.cpp
+    external/imgui/imgui_draw.cpp
+    external/imgui/imgui_tables.cpp
+    external/imgui/imgui_widgets.cpp
+
+    external/imgui/backends/imgui_impl_sdl3.cpp
+    external/imgui/backends/imgui_impl_dx11.cpp
+)
+
+target_include_directories(imgui
+    PUBLIC
+        external/imgui
+        external/imgui/backends
+        external/SDL/include
+)
+
+target_link_libraries(imgui 
+    PUBLIC
+        SDL3::SDL3
+)
+
 target_link_libraries(LevelEditor
     PRIVATE
         SDL3::SDL3
         glm::glm
+        imgui
 )
 
 if(WIN32)

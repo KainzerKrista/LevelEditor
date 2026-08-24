@@ -147,6 +147,157 @@ bool Renderer::Initialize(HWND windowHandle, int width, int height)
 	return true;
 }
 
+ID3D11ShaderResourceView* Renderer::GetViewportShaderResourceView() const
+{
+	return m_viewportShaderResourceView.Get();
+}
+
+bool Renderer::CreateViewportRenderTarget(int width, int height)
+{
+	if (width <= 0 || height <= 0)
+	{
+		return false;
+	}
+
+	// Create colour textures
+	D3D11_TEXTURE2D_DESC textureDescription{};
+
+	textureDescription.Width = static_cast<UINT>(width);
+	textureDescription.Height = static_cast<UINT>(height);
+
+	textureDescription.MipLevels = 1;
+	textureDescription.ArraySize = 1;
+	textureDescription.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+
+	textureDescription.SampleDesc.Count = 1;
+	textureDescription.SampleDesc.Quality = 0;
+
+	textureDescription.Usage = D3D11_USAGE_DEFAULT;
+	textureDescription.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE; // Ensures ImGui's pixel shader is being read while drawing textures
+
+	HRESULT result = m_device->CreateTexture2D(&textureDescription, nullptr, &m_viewportTexture);
+
+	if (FAILED(result))
+	{
+		std::cerr << "ERROR: Failed to create viewport texture\n";
+		return false;
+	}
+
+	// Render Target View
+	result = m_device->CreateRenderTargetView(m_viewportTexture.Get(), nullptr, &m_viewportRenderTargetView);
+	if (FAILED(result))
+	{
+		std::cerr << "ERROR: Failed to create viewport target\n";
+		return false;
+	}
+
+	// Shader Resource View
+	result = m_device->CreateShaderResourceView(m_viewportTexture.Get(), nullptr, &m_viewportShaderResourceView);
+
+	if (FAILED(result))
+	{
+		std::cerr << "ERROR: Failed to create viewport shader resource view\n";
+		return false;
+	}
+
+	// Viewport Depth Buffer
+	D3D11_TEXTURE2D_DESC depthDescription{};
+	depthDescription.Width = static_cast<UINT>(width);
+	depthDescription.Height = static_cast<UINT>(height);
+
+	depthDescription.MipLevels = 1;
+	depthDescription.ArraySize = 1;
+
+	depthDescription.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+
+	depthDescription.SampleDesc.Count = 1;
+	depthDescription.SampleDesc.Quality = 0;
+
+	depthDescription.Usage = D3D11_USAGE_DEFAULT;
+	depthDescription.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+
+	result = m_device->CreateTexture2D(&depthDescription, nullptr, &m_viewportDepthBuffer);
+	if (FAILED(result))
+	{
+		std::cerr << "ERROR: Failed to create viewport depth buffer\n";
+		return false;
+	}
+
+	result = m_device->CreateDepthStencilView(m_viewportDepthBuffer.Get(), nullptr, &m_viewportDepthStencilView);
+	if (FAILED(result))
+	{
+		std::cerr << "ERROR: Failed to create depth stencil view\n";
+		return false;
+	}
+	
+	m_viewportWidth = width;
+	m_viewportHeight = height;
+
+	return true;
+}
+
+void Renderer::BeginViewportFrame(float red, float green, float blue, float alpha)
+{
+	if (!m_viewportRenderTargetView || !m_viewportDepthStencilView)
+	{
+		return;
+	}
+
+	ID3D11ShaderResourceView* nullViews[] = { nullptr };
+
+	m_deviceContext->PSSetShaderResources(0, 1, nullViews);
+	ID3D11RenderTargetView* renderTargets[] = { m_viewportRenderTargetView.Get() };
+	m_deviceContext->OMSetRenderTargets(1, renderTargets, m_viewportDepthStencilView.Get());
+
+	// Match viewport sizing to IMGUI viewport texture
+	D3D11_VIEWPORT viewport{};
+
+	viewport.TopLeftX = 0.0f;
+	viewport.TopLeftY = 0.0f;
+
+	viewport.Width = static_cast<float>(m_viewportWidth);
+	viewport.Height = static_cast<float>(m_viewportHeight);
+
+	viewport.MinDepth = 0.0f;
+	viewport.MaxDepth = 1.0f;
+
+	m_deviceContext->RSSetViewports(1, &viewport);
+
+	const float clearColor[] = { red, green, blue, alpha };
+
+	m_deviceContext->ClearRenderTargetView(m_viewportRenderTargetView.Get(), clearColor);
+	m_deviceContext->ClearDepthStencilView(m_viewportDepthStencilView.Get(), D3D11_CLEAR_DEPTH, 1.0f, 0);
+}
+
+void Renderer::EndViewportFrame()
+{
+	m_deviceContext->OMSetRenderTargets(0, nullptr, nullptr);
+}
+
+// Resizing editor viewport when SDL window resizes
+bool Renderer::ResizeViewport(int width, int height)
+{
+	if (width <= 0 || height <= 0)
+	{
+		return false;
+	}
+
+	if (width == m_viewportWidth && height == m_viewportHeight)
+	{
+		return true;
+	}
+
+	// Unbound old resources
+	m_deviceContext->OMSetRenderTargets(0, nullptr, nullptr);
+
+	ID3D11ShaderResourceView* nullViews[] = { nullptr };
+	m_deviceContext->PSSetShaderResources(0, 1, nullViews);
+
+	DestroyViewportRenderTarget();
+
+	return CreateViewportRenderTarget(width, height);
+}
+
 bool Renderer::CreateRenderTarget()
 {
 	Microsoft::WRL::ComPtr<ID3D11Texture2D> backBuffer;
@@ -457,6 +608,8 @@ void Renderer::BeginFrame(float red, float green, float blue, float alpha)
 		return;
 	}
 
+	UpdateViewport(m_width, m_height);
+
 	ID3D11RenderTargetView* renderTargets[] = { m_renderTargetView.Get() };
 	
 	m_deviceContext->OMSetRenderTargets(1, renderTargets, m_depthStencilView.Get());
@@ -477,8 +630,23 @@ void Renderer::EndFrame()
 	m_swapChain->Present(1, 0);
 }
 
+void Renderer::DestroyViewportRenderTarget()
+{
+	m_viewportDepthStencilView.Reset();
+	m_viewportDepthBuffer.Reset();
+
+	m_viewportShaderResourceView.Reset();
+	m_viewportRenderTargetView.Reset();
+	m_viewportTexture.Reset();
+
+	m_viewportWidth = 0;
+	m_viewportHeight = 0;
+}
+
 void Renderer::Shutdown()
 {
+	DestroyViewportRenderTarget();
+
 	DestroyRenderTarget();
 	DestroyDepthBuffer();
 
@@ -493,4 +661,15 @@ void Renderer::Shutdown()
 	m_swapChain.Reset();
 	m_deviceContext.Reset();
 	m_device.Reset();
+}
+
+// Expose D3D objects
+ID3D11Device* Renderer::GetDevice() const
+{
+	return m_device.Get();
+}
+
+ID3D11DeviceContext* Renderer::GetDeviceContext() const
+{
+	return m_deviceContext.Get();
 }

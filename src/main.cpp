@@ -9,7 +9,12 @@
 #include <chrono>
 #include <iostream>
 
+#include "imgui.h"
+#include "imgui_impl_sdl3.h"
+#include "imgui_impl_dx11.h"
+
 #include "Renderer.h"
+#include "Mesh.h"
 #include "EditorCamera.h"
 
 namespace
@@ -149,6 +154,32 @@ int main(int argc, char* argv[])
         return 1;
     }
 
+    // Create IMGUI
+    IMGUI_CHECKVERSION();
+
+    ImGui::CreateContext();
+
+    // Enable IMGUI Docking
+    ImGuiIO& io = ImGui::GetIO();
+    
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+
+    ImGui::StyleColorsDark();
+
+    // Initialize IMGUI Backends
+    if (!ImGui_ImplSDL3_InitForD3D(window))
+    {
+        std::cerr << "ERROR: Failed to initialize IMGUI SDL3 backend\n";
+        return 1;
+    }
+
+    if (!ImGui_ImplDX11_Init(renderer.GetDevice(), renderer.GetDeviceContext()))
+    {
+        std::cerr << "ERROR: Failed to initialize IMGUI D3D11 backend\n";
+        return 1;
+    }
+
     // Create Editor Camera
     EditorCamera editorCamera;
 
@@ -184,6 +215,10 @@ int main(int argc, char* argv[])
     auto previousTime = std::chrono::steady_clock::now();
     bool running = true;
 
+    // IMGUI viewport hovered check
+    bool viewportHovered = false;
+    bool viewportFocused = false;
+
     while (running)
     {
         auto currentTime = std::chrono::steady_clock::now();
@@ -195,10 +230,14 @@ int main(int argc, char* argv[])
             deltaTime = 0.1f;
         }
 
-        SDL_Event event;
 
+        SDL_Event event;
+        
         while (SDL_PollEvent(&event))
         {
+            // Bind IMGUI to SDL switch cases
+            ImGui_ImplSDL3_ProcessEvent(&event);
+
             switch (event.type)
             {
                 case SDL_EVENT_QUIT:
@@ -223,9 +262,11 @@ int main(int argc, char* argv[])
                 
                 case SDL_EVENT_MOUSE_BUTTON_DOWN:
                 {
-                    if (event.button.button == SDL_BUTTON_RIGHT)
+                    if (event.button.button == SDL_BUTTON_RIGHT && viewportHovered)
                     {
                         editorCamera.SetLooking(true);
+
+                        SDL_SetWindowRelativeMouseMode(window, true);
 
                         if (!SDL_SetWindowRelativeMouseMode(window, true))
                         {
@@ -233,7 +274,7 @@ int main(int argc, char* argv[])
                                 << "ERROR: Failed to enable relative mouse mode:"
                                 << SDL_GetError()
                                 << '\n';
-                        }
+                        };
 
                     }
 
@@ -262,7 +303,7 @@ int main(int argc, char* argv[])
                 // Exposes xrel and yrel as relative mouse movements for camera rotation
                 case SDL_EVENT_MOUSE_MOTION:
                 {
-                    if (editorCamera.IsLooking())
+                    if (editorCamera.IsLooking() && viewportHovered)
                     {
                         editorCamera.Rotate(event.motion.xrel, event.motion.yrel);
                     }
@@ -324,23 +365,127 @@ int main(int argc, char* argv[])
             editorCamera.Move(forwardInput, rightInput, upInput, deltaTime, boost);
         }
 
-        // Camera Matrixes
+        // Process Events for IMGUI
+        ImGui_ImplDX11_NewFrame();
+        ImGui_ImplSDL3_NewFrame();
+        ImGui::NewFrame();
+
+        // Editor UI
+        ImGui::DockSpaceOverViewport();
+
+        // Hierarchy Content
+        if (ImGui::BeginMainMenuBar())
+        {
+            if (ImGui::BeginMenu("File"))
+            {
+                ImGui::MenuItem("New Scene");
+                ImGui::MenuItem("Open Scene");
+                ImGui::MenuItem("Save Scene");
+
+                ImGui::Separator();
+
+                if (ImGui::MenuItem("Exit"))
+                {
+                    running = false;
+                }
+
+                ImGui::EndMenu();
+            }
+#
+            if (ImGui::BeginMenu("View"))
+            {
+                ImGui::MenuItem("Hierarchy");
+                ImGui::MenuItem("Inspector");
+                ImGui::MenuItem("Content Browser");
+
+                ImGui::EndMenu();
+            }
+
+            ImGui::EndMainMenuBar();
+        }
+
+        // Scene Hierarchy Content
+        ImGui::Begin("Hierarchy");
+
+        ImGui::Text("Scene");
+        ImGui::Separator();
+
+        ImGui::BulletText("Cube 1");
+        ImGui::BulletText("Cube 2");
+        ImGui::End();
+
+        // Viewport Content
+        ImGui::Begin("Viewport");
+        
+        const ImVec2 viewportSize = ImGui::GetContentRegionAvail();
+        const int viewportWidth = static_cast<int>(viewportSize.x);
+        const int viewportHeight = static_cast<int>(viewportSize.y);
+
+        if (viewportWidth > 0 && viewportHeight > 0)
+        {
+            renderer.ResizeViewport(viewportWidth, viewportHeight);
+
+            editorCamera.SetViewportSize(viewportWidth, viewportHeight);
+
+            ID3D11ShaderResourceView* viewportTexture = renderer.GetViewportShaderResourceView();
+            if (viewportTexture != nullptr)
+            {
+                ImTextureID textureID = static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(viewportTexture));
+                ImGui::Image(ImTextureRef(textureID), viewportSize);
+            }
+        }
+
+        // Makes sure Camera only moves on input while viewport is hovered
+        viewportHovered = ImGui::IsWindowHovered();
+        viewportFocused = ImGui::IsWindowFocused();
+
+        ImGui::End();
+
+        // Inspector Content
+        ImGui::Begin("Inspector");
+        ImGui::Text("Transform");
+        ImGui::Separator();
+
+        ImGui::Text("Position");
+        ImGui::Text("Rotation");
+        ImGui::Text("Scale");
+
+        ImGui::End();
+
+        // Content Browser Content
+        ImGui::Begin("Content Browser");
+        ImGui::Text("Assets");
+        ImGui::End();
+
+        // Camera Matrices
         const glm::mat4 view = editorCamera.GetViewMatrix();
         const glm::mat4 projection = editorCamera.GetProjectionMatrix();
 
         // Rendering
-        renderer.BeginFrame(0.08f, 0.09f, 0.11f, 1.0f);
-
-        // TODO: Draw Scenes functions are added here later
-
-
+        renderer.BeginViewportFrame(0.09f, 0.08f, 0.11f, 1.0f);
+      
+        // Render Scene
         renderer.DrawMesh(cubeMesh, cubeTransform, view, projection);
         renderer.DrawMesh(cubeMesh, cubeTransform2, view, projection);
-        renderer.EndFrame();
+
+        renderer.EndViewportFrame();
+
+        // Render the editor window (IMGUI) on top of the scene
+        renderer.BeginFrame(0.08f, 0.09f, 0.11f, 1.0f);
+        ImGui::Render();
+        ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+
+        // Present frames
+        renderer.EndFrame();        
     }
     
     // Render Cleanup
     cubeMesh.Shutdown();
+
+    ImGui_ImplDX11_Shutdown();
+    ImGui_ImplSDL3_Shutdown();
+    ImGui::DestroyContext();
+
     renderer.Shutdown();
 
     SDL_DestroyWindow(window);
