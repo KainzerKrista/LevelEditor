@@ -16,6 +16,9 @@ add_executable(LevelEditor
     src/Renderer.cpp 
     src/Mesh.cpp
     src/EditorCamera.cpp
+    src/Entity.cpp
+    src/Scene.cpp
+    src/TransformComponent.h
     assets/shaders/Triangle.hlsl
  "src/Mesh.h" "src/Mesh.cpp" "src/EditorCamera.h" "src/EditorCamera.cpp")
  

@@ -16,6 +16,7 @@
 #include "Renderer.h"
 #include "Mesh.h"
 #include "EditorCamera.h"
+#include "Scene.h"
 
 namespace
 {
@@ -198,18 +199,22 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    // Cube Transform
-    glm::mat4 cubeTransform = glm::mat4(1.0f);
+    // Cube Creation
+    Scene scene;
 
-    cubeTransform = glm::translate(cubeTransform, glm::vec3(0.0f, 0.0f, 2.5f));
-    cubeTransform = glm::rotate(cubeTransform, glm::radians(25.0f), glm::vec3(1.0f, 0.0f, 0.0f));
-    cubeTransform = glm::rotate(cubeTransform, glm::radians(35.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    Entity& cube1 = scene.CreateEntity("Cube 1");
+    cube1.SetMesh(&cubeMesh);
 
-    glm::mat4 cubeTransform2 = glm::mat4(1.0f);
+    cube1.GetTransform().position = glm::vec3(0.0f, 0.0f, 2.5f);
+    cube1.GetTransform().rotation = glm::vec3(25.0f, 35.0f, 0.0f);
 
-    cubeTransform2 = glm::translate(cubeTransform2, glm::vec3(1.2f, 0.0f, 3.5f));
-    cubeTransform2 = glm::rotate(cubeTransform2, glm::radians(25.0f), glm::vec3(1.0f, 0.0f, 0.0f));
-    cubeTransform2 = glm::rotate(cubeTransform2, glm::radians(35.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    Entity& cube2 = scene.CreateEntity("Cube 2");
+    cube2.SetMesh(&cubeMesh);
+
+    cube2.GetTransform().position = glm::vec3(1.2f, 0.0f, 3.5f);
+    cube2.GetTransform().rotation = glm::vec3(25.0f, 35.0f, 0.0f);
+
+    std::uint32_t selectedEntityID = 0;
 
     // Application loop to run per second
     auto previousTime = std::chrono::steady_clock::now();
@@ -410,8 +415,16 @@ int main(int argc, char* argv[])
         ImGui::Text("Scene");
         ImGui::Separator();
 
-        ImGui::BulletText("Cube 1");
-        ImGui::BulletText("Cube 2");
+        // Get Entity ID to display in IMGUI menu
+        for (const Entity& entity : scene.GetEntities())
+        {
+            const bool isSelected = selectedEntityID == entity.GetID();
+            if (ImGui::Selectable(entity.GetName().c_str(), isSelected))
+            {
+                selectedEntityID = entity.GetID();
+            }
+        }
+
         ImGui::End();
 
         // Viewport Content
@@ -443,12 +456,28 @@ int main(int argc, char* argv[])
 
         // Inspector Content
         ImGui::Begin("Inspector");
-        ImGui::Text("Transform");
-        ImGui::Separator();
 
-        ImGui::Text("Position");
-        ImGui::Text("Rotation");
-        ImGui::Text("Scale");
+        Entity* selectedEntity = scene.FindEntity(selectedEntityID);
+
+        if (selectedEntity != nullptr)
+        {
+            ImGui::Text("%s", selectedEntity->GetName().c_str());
+
+            ImGui::Separator();
+    
+            TransformComponent& transform = selectedEntity->GetTransform();
+            ImGui::Text("Transform");
+
+            // Use dragflaot3 to edit transform matrices directly
+            ImGui::DragFloat3("Position", &transform.position.x, 0.05f);
+            ImGui::DragFloat3("Rotation", &transform.rotation.x, 0.05f);
+            ImGui::DragFloat3("Scale", &transform.scale.x, 0.05f);
+
+        }
+        else
+        {
+            ImGui::TextDisabled("No Entity Selected.");
+        }
 
         ImGui::End();
 
@@ -464,9 +493,21 @@ int main(int argc, char* argv[])
         // Rendering
         renderer.BeginViewportFrame(0.09f, 0.08f, 0.11f, 1.0f);
       
-        // Render Scene
-        renderer.DrawMesh(cubeMesh, cubeTransform, view, projection);
-        renderer.DrawMesh(cubeMesh, cubeTransform2, view, projection);
+        // Gets all scene entities to render
+        for (const Entity& entity : scene.GetEntities())
+        {
+            Mesh* mesh = entity.GetMesh();
+
+            if (mesh == nullptr)
+            {
+                continue;
+            }
+
+            const glm::mat4  model = entity.GetTransform().GetTranform();
+
+            renderer.DrawMesh(*mesh, model, view, projection);
+
+        }
 
         renderer.EndViewportFrame();
 
