@@ -1,5 +1,5 @@
 #pragma once
-#include "Mesh.h"
+#include "Renderer/Mesh.h"
 #include <Windows.h>
 
 // Direct3D 11
@@ -27,7 +27,7 @@ public:
 	void BeginFrame(float red, float green, float blue, float alpha);
 	void EndFrame();
 
-	bool CreateMesh(Mesh& mesh, std::span<const Vertex> vertices, std::span<const std::uint16_t> indices);
+	bool CreateMesh(Mesh& mesh, std::span<const Vertex> vertices, std::span<const std::uint32_t> indices);
 	void DrawMesh(const Mesh& mesh, const glm::mat4& model, const glm::mat4& view, const glm::mat4& projection);
 
 	bool ResizeViewport(int width, int height);

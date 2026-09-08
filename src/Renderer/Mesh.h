@@ -19,7 +19,7 @@ struct Vertex
 class Mesh
 {
 public:
-	bool Initialize(ID3D11Device* device, std::span<const Vertex> vertices, std::span<const std::uint16_t> indices);
+	bool Initialize(ID3D11Device* device, std::span<const Vertex> vertices, std::span<const std::uint32_t> indices);
 
 	void Shutdown();
 

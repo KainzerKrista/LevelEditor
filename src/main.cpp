@@ -5,18 +5,32 @@
 #include <glm/glm.hpp>
 #include <glm/ext/matrix_transform.hpp>
 
+#include <memory>
 #include <cstdint>
 #include <chrono>
 #include <iostream>
+#include <filesystem>
 
 #include "imgui.h"
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_dx11.h"
 
-#include "Renderer.h"
-#include "Mesh.h"
-#include "EditorCamera.h"
-#include "Scene.h"
+#include "Renderer/Renderer.h"
+#include "Renderer/Mesh.h"
+#include "Renderer/MeshData.h"
+
+#include "Assets/ObjectLoader.h"
+#include "Assets/AssetManager.h"
+
+#include "Scene/Scene.h"
+#include "Scene/SceneSerializer.h"
+
+#include "Editor/EditorCamera.h"
+
+#include "Editor/Panels/HierarchyPanel.h"
+#include "Editor/Panels/InspectorPanel.h"
+#include "Editor/Panels/ContentPanel.h"
+#include "Editor/Panels/ViewportPanel.h"
 
 namespace
 {
@@ -65,7 +79,7 @@ namespace
 
     };
 
-    constexpr std::uint16_t CubeIndices[] =
+    constexpr std::uint32_t CubeIndices[] =
     {
         // Front
         0, 1, 2,
@@ -186,43 +200,138 @@ int main(int argc, char* argv[])
 
     editorCamera.SetViewportSize(width, height);
 
-    // Create Cube Mesh
-    Mesh cubeMesh;
+    // Asset Manager
+    AssetManager assetManager;
 
-    if (!renderer.CreateMesh(cubeMesh, CubeVertices, CubeIndices))
+    auto cubeMesh = std::make_unique<Mesh>();
+
+    if (!renderer.CreateMesh(*cubeMesh, CubeVertices, CubeIndices))
     {
-        std::cerr << "ERROR: Failed to create cube mesh\n";
+        std::cerr << "ERROR: Failed to create Cube mesh\n";
+        return 1;
+    }
 
-        SDL_DestroyWindow(window);
-        SDL_Quit();
+    if (!assetManager.RegisterMesh("Cube", std::move(cubeMesh)))
+    {
+        std::cerr << "ERROR: Failed to register Cube asset\n";
 
         return 1;
+    }
+
+    std::cout << "Working dir: "
+        << std::filesystem::current_path()
+        << '\n';
+
+    // Discover object assets
+    const std::filesystem::path modelsDirectory = "assets/models";
+
+    if (std::filesystem::exists(modelsDirectory))
+    {
+        for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(modelsDirectory))
+        {
+            // Ignore directories
+            if (!entry.is_regular_file())
+            {
+                continue;
+            }
+
+            // .obj support
+            if (entry.path().extension() != ".obj")
+            {
+                continue;
+            }
+
+            const std::string assetName = entry.path().stem().string();
+            const std::string filePath = entry.path().string();
+
+            std::cout
+                << "Loading mesh assets: "
+                << assetName
+                << '\n';
+
+            MeshData meshData;
+            if (!ObjectLoader::Load(filePath, meshData))
+            {
+                std::cerr
+                    << "ERROR: Failed to load mesh asset: "
+                    << assetName
+                    << '\n';
+
+                continue;
+            }
+
+            auto mesh = std::make_unique<Mesh>();
+
+            if (!renderer.CreateMesh(*mesh, meshData.vertices, meshData.indices))
+            {
+                std::cerr 
+                    << "ERROR: Failed to create GPU mesh"
+                    << assetName
+                    << '\n';
+
+                continue;
+            }
+
+            if (!assetManager.RegisterMesh(assetName, std::move(mesh)))
+            {
+                std::cerr
+                    << "ERROR: Failed to register asset"
+                    << assetName
+                    << '\n';
+
+                continue;
+            }
+
+            std::cout
+                << "Loaded Mesh Asset: "
+                << assetName
+                << '\n';
+        }
+    }
+    else
+    {
+        std::cout
+            << "WARNING: Models dir does not exist!"
+            << modelsDirectory
+            << '\n';
     }
 
     // Cube Creation
     Scene scene;
 
     Entity& cube1 = scene.CreateEntity("Cube 1");
-    cube1.SetMesh(&cubeMesh);
+    MeshComponent& cube1Mesh = cube1.AddMeshComponent();
+    cube1Mesh.assetName = "Cube";
+    cube1Mesh.mesh = assetManager.GetMesh("Cube");
 
     cube1.GetTransform().position = glm::vec3(0.0f, 0.0f, 2.5f);
     cube1.GetTransform().rotation = glm::vec3(25.0f, 35.0f, 0.0f);
 
     Entity& cube2 = scene.CreateEntity("Cube 2");
-    cube2.SetMesh(&cubeMesh);
+    MeshComponent& cube2Mesh = cube2.AddMeshComponent();
+    cube2Mesh.assetName = "Cube";
+    cube2Mesh.mesh = assetManager.GetMesh("Cube");
 
     cube2.GetTransform().position = glm::vec3(1.2f, 0.0f, 3.5f);
     cube2.GetTransform().rotation = glm::vec3(25.0f, 35.0f, 0.0f);
 
     std::uint32_t selectedEntityID = 0;
 
+    // Temporary mesh asset resolver
+    auto meshResolver = [&assetManager](const std::string& assetName) ->Mesh*
+    {
+        return assetManager.GetMesh(assetName);
+    };
+
+    // Editor Panels
+    HierarchyPanel hierarchyPanel;
+    InspectorPanel inspectorPanel;
+    ContentPanel contentPanel;
+    ViewportPanel viewportPanel;
+
     // Application loop to run per second
     auto previousTime = std::chrono::steady_clock::now();
     bool running = true;
-
-    // IMGUI viewport hovered check
-    bool viewportHovered = false;
-    bool viewportFocused = false;
 
     while (running)
     {
@@ -260,18 +369,14 @@ int main(int argc, char* argv[])
 
                     renderer.Resize(newWidth, newHeight);
 
-                    editorCamera.SetViewportSize(newWidth, newHeight);
-
                     break;
                 }
                 
                 case SDL_EVENT_MOUSE_BUTTON_DOWN:
                 {
-                    if (event.button.button == SDL_BUTTON_RIGHT && viewportHovered)
+                    if (event.button.button == SDL_BUTTON_RIGHT && viewportPanel.IsHovered())
                     {
                         editorCamera.SetLooking(true);
-
-                        SDL_SetWindowRelativeMouseMode(window, true);
 
                         if (!SDL_SetWindowRelativeMouseMode(window, true))
                         {
@@ -308,7 +413,7 @@ int main(int argc, char* argv[])
                 // Exposes xrel and yrel as relative mouse movements for camera rotation
                 case SDL_EVENT_MOUSE_MOTION:
                 {
-                    if (editorCamera.IsLooking() && viewportHovered)
+                    if (editorCamera.IsLooking() && viewportPanel.IsHovered())
                     {
                         editorCamera.Rotate(event.motion.xrel, event.motion.yrel);
                     }
@@ -383,9 +488,31 @@ int main(int argc, char* argv[])
         {
             if (ImGui::BeginMenu("File"))
             {
-                ImGui::MenuItem("New Scene");
-                ImGui::MenuItem("Open Scene");
-                ImGui::MenuItem("Save Scene");
+
+                if (ImGui::MenuItem("New Scene"))
+                {
+                    scene.Clear();
+                    selectedEntityID = 0;
+
+                }
+
+                if (ImGui::MenuItem("Open Scene"))
+                {
+                    if (SceneSerializer::Load(scene, "scene.json", meshResolver))
+                    {
+                        selectedEntityID = 0;
+                        std::cout << "Scene Loaded Successfully";
+                    }
+                }
+
+                if (ImGui::MenuItem("Save Scene"))
+                {
+                    if (SceneSerializer::Save(scene, "scene.json"))
+                    {
+                        std::cout << "Scene saved successfully\n";
+                    }
+                }
+
 
                 ImGui::Separator();
 
@@ -394,97 +521,30 @@ int main(int argc, char* argv[])
                     running = false;
                 }
 
-                ImGui::EndMenu();
-            }
-#
-            if (ImGui::BeginMenu("View"))
-            {
                 ImGui::MenuItem("Hierarchy");
                 ImGui::MenuItem("Inspector");
+                
+                // Content Browser
                 ImGui::MenuItem("Content Browser");
 
                 ImGui::EndMenu();
+
             }
 
             ImGui::EndMainMenuBar();
         }
 
         // Scene Hierarchy Content
-        ImGui::Begin("Hierarchy");
-
-        ImGui::Text("Scene");
-        ImGui::Separator();
-
-        // Get Entity ID to display in IMGUI menu
-        for (const Entity& entity : scene.GetEntities())
-        {
-            const bool isSelected = selectedEntityID == entity.GetID();
-            if (ImGui::Selectable(entity.GetName().c_str(), isSelected))
-            {
-                selectedEntityID = entity.GetID();
-            }
-        }
-
-        ImGui::End();
-
-        // Viewport Content
-        ImGui::Begin("Viewport");
-        
-        const ImVec2 viewportSize = ImGui::GetContentRegionAvail();
-        const int viewportWidth = static_cast<int>(viewportSize.x);
-        const int viewportHeight = static_cast<int>(viewportSize.y);
-
-        if (viewportWidth > 0 && viewportHeight > 0)
-        {
-            renderer.ResizeViewport(viewportWidth, viewportHeight);
-
-            editorCamera.SetViewportSize(viewportWidth, viewportHeight);
-
-            ID3D11ShaderResourceView* viewportTexture = renderer.GetViewportShaderResourceView();
-            if (viewportTexture != nullptr)
-            {
-                ImTextureID textureID = static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(viewportTexture));
-                ImGui::Image(ImTextureRef(textureID), viewportSize);
-            }
-        }
-
-        // Makes sure Camera only moves on input while viewport is hovered
-        viewportHovered = ImGui::IsWindowHovered();
-        viewportFocused = ImGui::IsWindowFocused();
-
-        ImGui::End();
+        hierarchyPanel.Draw(scene, selectedEntityID);
 
         // Inspector Content
-        ImGui::Begin("Inspector");
-
-        Entity* selectedEntity = scene.FindEntity(selectedEntityID);
-
-        if (selectedEntity != nullptr)
-        {
-            ImGui::Text("%s", selectedEntity->GetName().c_str());
-
-            ImGui::Separator();
-    
-            TransformComponent& transform = selectedEntity->GetTransform();
-            ImGui::Text("Transform");
-
-            // Use dragflaot3 to edit transform matrices directly
-            ImGui::DragFloat3("Position", &transform.position.x, 0.05f);
-            ImGui::DragFloat3("Rotation", &transform.rotation.x, 0.05f);
-            ImGui::DragFloat3("Scale", &transform.scale.x, 0.05f);
-
-        }
-        else
-        {
-            ImGui::TextDisabled("No Entity Selected.");
-        }
-
-        ImGui::End();
+        inspectorPanel.Draw(scene, assetManager, selectedEntityID);
 
         // Content Browser Content
-        ImGui::Begin("Content Browser");
-        ImGui::Text("Assets");
-        ImGui::End();
+        contentPanel.Draw(assetManager);
+
+        // Viewport Panel Content
+        viewportPanel.Draw(renderer, editorCamera);
 
         // Camera Matrices
         const glm::mat4 view = editorCamera.GetViewMatrix();
@@ -496,16 +556,17 @@ int main(int argc, char* argv[])
         // Gets all scene entities to render
         for (const Entity& entity : scene.GetEntities())
         {
-            Mesh* mesh = entity.GetMesh();
+            // Checks if Entity has a valid mesh component before drawing it, otherwise skip
+            const MeshComponent* meshComponent = entity.GetMeshComponent();
 
-            if (mesh == nullptr)
+            if (meshComponent == nullptr || meshComponent->mesh == nullptr)
             {
                 continue;
             }
 
-            const glm::mat4  model = entity.GetTransform().GetTranform();
+            const glm::mat4  model = entity.GetTransform().GetTransform();
 
-            renderer.DrawMesh(*mesh, model, view, projection);
+            renderer.DrawMesh(*meshComponent->mesh, model, view, projection);
 
         }
 
@@ -519,14 +580,12 @@ int main(int argc, char* argv[])
         // Present frames
         renderer.EndFrame();        
     }
-    
-    // Render Cleanup
-    cubeMesh.Shutdown();
 
     ImGui_ImplDX11_Shutdown();
     ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
 
+    assetManager.Shutdown();
     renderer.Shutdown();
 
     SDL_DestroyWindow(window);

@@ -1,8 +1,8 @@
-#include "Mesh.h"
+#include "Renderer/Mesh.h"
 
 #include <iostream>
 
-bool Mesh::Initialize(ID3D11Device* device, std::span<const Vertex> vertices, std::span<const std::uint16_t> indices)
+bool Mesh::Initialize(ID3D11Device* device, std::span<const Vertex> vertices, std::span<const std::uint32_t> indices)
 {
 	if (device == nullptr)
 	{

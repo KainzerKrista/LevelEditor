@@ -10,18 +10,37 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_subdirectory(external/SDL EXCLUDE_FROM_ALL)
 add_subdirectory(external/glm EXCLUDE_FROM_ALL)
+add_subdirectory(external/json EXCLUDE_FROM_ALL)
 
 add_executable(LevelEditor
     src/main.cpp
-    src/Renderer.cpp 
-    src/Mesh.cpp
-    src/EditorCamera.cpp
-    src/Entity.cpp
-    src/Scene.cpp
-    src/TransformComponent.h
+    src/Assets/AssetManager.cpp
+    src/Assets/ObjectLoader.cpp
+
+    src/Editor/Panels/ContentPanel.cpp
+    src/Editor/Panels/HierarchyPanel.cpp
+    src/Editor/Panels/InspectorPanel.cpp
+    src/Editor/Panels/ViewportPanel.cpp
+
+    src/Editor/EditorCamera.cpp
+    
+    src/Renderer/Renderer.cpp
+    src/Renderer/Mesh.cpp
+    src/Renderer/MeshData.h
+    
+    src/Scene/Entity.cpp
+    src/Scene/Scene.cpp
+    src/Scene/SceneSerializer.cpp
+
+    src/Scene/Components/TransformComponent.h
+    src/Scene/Components/MeshComponent.h
     assets/shaders/Triangle.hlsl
- "src/Mesh.h" "src/Mesh.cpp" "src/EditorCamera.h" "src/EditorCamera.cpp")
+)
  
+ target_include_directories(LevelEditor PRIVATE 
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+ )
+
 set_source_files_properties(
     assets/shaders/Triangle.hlsl
     PROPERTIES
@@ -56,6 +75,7 @@ target_link_libraries(LevelEditor
         SDL3::SDL3
         glm::glm
         imgui
+        nlohmann_json::nlohmann_json
 )
 
 if(WIN32)
@@ -88,6 +108,15 @@ if(WIN32)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/Triangle.hlsl"
             "$<TARGET_FILE_DIR:LevelEditor>/assets/shaders/Triangle.hlsl"
+
+        # Create Model Directory
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_FILE_DIR:LevelEditor>/assets/models"
+
+        # Copy Model Assets
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/models"
+        "$<TARGET_FILE_DIR:LevelEditor>/assets/models"
 
         VERBATIM
     )

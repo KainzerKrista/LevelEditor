@@ -479,7 +479,7 @@ bool Renderer::CreateMeshPipeline()
 	return true;
 }
 
-bool Renderer::CreateMesh(Mesh& mesh, std::span<const Vertex> vertices, std::span<const std::uint16_t> indices)
+bool Renderer::CreateMesh(Mesh& mesh, std::span<const Vertex> vertices, std::span<const std::uint32_t> indices)
 {
 	if (!m_device)
 	{
@@ -514,7 +514,7 @@ void Renderer::DrawMesh(const Mesh& mesh, const glm::mat4& model, const glm::mat
 
 	// Input Assembler
 	m_deviceContext->IASetVertexBuffers(0, 1, vertexBuffers, &stride, &offset);
-	m_deviceContext->IASetIndexBuffer(mesh.GetIndexBuffer(), DXGI_FORMAT_R16_UINT, 0); // Using R16 because std::uint16_t is being used
+	m_deviceContext->IASetIndexBuffer(mesh.GetIndexBuffer(), DXGI_FORMAT_R32_UINT, 0); // Using R16 because std::uint16_t is being used
 	m_deviceContext->IASetInputLayout(m_inputLayout.Get());
 	m_deviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 

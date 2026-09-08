@@ -1,4 +1,4 @@
-#include "EditorCamera.h"
+#include "Editor/EditorCamera.h"
 
 #include <glm/glm.hpp>
 #include <glm/ext/matrix_transform.hpp>
